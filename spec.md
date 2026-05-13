@@ -69,7 +69,7 @@ The minimum viable product is a CLI. A stretch goal is an integration with GNOME
 - Clones the Ubuntu Desktop documentation Git repository locally
 - Detects Ubuntu version on the host machine
 - On startup (or on demand), pulls latest changes
-- Stores docs under a versioned path (e.g. `~/.local/share/desktop-help/docs/24.04/`)
+- Stores docs under a local path using environment variables.
 
 ### 2. Indexer
 
