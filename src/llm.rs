@@ -1,4 +1,7 @@
-use anyhow::Result;
+use std::io::{self, Write};
+
+use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -15,14 +18,17 @@ pub struct Message {
 struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [Message],
-    // When false, Ollama returns the full response at once instead of streaming tokens
+    // When true, Ollama sends one JSON object per line as tokens are generated
     stream: bool,
 }
 
-// The JSON body returned by Ollama's /api/chat endpoint
+// One line of the streaming response from Ollama's /api/chat endpoint
 #[derive(Deserialize)]
-struct ChatResponse {
+struct StreamChunk {
+    // Partial message; content is a single token or small group of tokens
     message: Message,
+    // True on the final chunk, indicating the response is complete
+    done: bool,
 }
 
 // HTTP client wrapping the Ollama REST API
@@ -45,27 +51,65 @@ impl OllamaClient {
         }
     }
 
-    // Sends the full conversation history to Ollama and returns the assistant's reply text
+    // Streams the assistant reply token-by-token, printing each token immediately as it arrives.
+    // Returns the full assembled reply string when done.
     pub async fn chat(&self, messages: &[Message]) -> Result<String> {
         let req = ChatRequest {
             model: &self.model,
             messages,
-            stream: false,
+            stream: true,
         };
 
         // Remove any trailing slash to avoid double-slash in the URL
         let endpoint = format!("{}/api/chat", self.url.trim_end_matches('/'));
-        let resp: ChatResponse = self
+        let response = self
             .client
             .post(&endpoint)
             .json(&req)
             .send()
             .await?
             // Converts HTTP 4xx/5xx responses into an Err instead of silently returning bad JSON
-            .error_for_status()?
-            .json()
-            .await?;
+            .error_for_status()?;
 
-        Ok(resp.message.content)
+        // Ollama streams newline-delimited JSON; each chunk is one line
+        let mut stream = response.bytes_stream();
+        let mut full_reply = String::new();
+        // Buffer to accumulate bytes until we have a complete newline-terminated JSON line
+        let mut buf = Vec::new();
+        let stdout = io::stdout();
+        let mut out = stdout.lock();
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.context("error reading stream chunk")?;
+            buf.extend_from_slice(&bytes);
+
+            // Process all complete lines in the buffer (Ollama sends one JSON object per line)
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                // Split off the line, leaving the remainder in buf
+                let line_bytes = buf.drain(..=pos).collect::<Vec<_>>();
+                let line = String::from_utf8_lossy(&line_bytes);
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                let chunk: StreamChunk =
+                    serde_json::from_str(line).context("failed to parse stream chunk")?;
+
+                // Print the token immediately without a newline so output flows continuously
+                write!(out, "{}", chunk.message.content)?;
+                out.flush()?;
+                full_reply.push_str(&chunk.message.content);
+
+                if chunk.done {
+                    break;
+                }
+            }
+        }
+
+        // Move to a new line after all tokens have been printed
+        writeln!(out)?;
+
+        Ok(full_reply)
     }
 }

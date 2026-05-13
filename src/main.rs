@@ -143,7 +143,8 @@ async fn run_chat(ollama_url: String, model: String, docs_dir: String) -> Result
 
                 match client.chat(&messages).await {
                     Ok(reply) => {
-                        println!("{reply}\n");
+                        // Tokens were already printed by the streaming chat call; just add spacing
+                        println!();
                         // Store the assistant reply so future turns have full context
                         messages.push(Message {
                             role: "assistant".to_string(),
