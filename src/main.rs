@@ -13,12 +13,18 @@ use llm::{CopilotClient, LlmClient, Message, OllamaClient};
 mod docs;
 use docs::load_chunks;
 
+// Import the RAG vector store module defined in vectordb.rs
+mod vectordb;
+use vectordb::{RagStore, TOP_K};
+
 // Default address where Ollama listens when installed locally
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 // Default model to use; small enough to run without a GPU
 const DEFAULT_MODEL: &str = "deepseek-r1:1.5b";
 // Default directory to load documentation markdown files from
 const DEFAULT_DOCS_DIR: &str = "docs";
+// Default gRPC address for a locally running Qdrant server
+const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 // Instruction given to the LLM at the start of every conversation
 const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer questions clearly and concisely. The user you are talking to is running Ubuntu. Do not offer advice on alternative operating systems. Prefer strongly the information that you receive as context within a session.";
 
@@ -46,9 +52,12 @@ enum Commands {
         // Ollama server URL; only used when --copilot is not set
         #[arg(long, env = "OLLAMA_URL", default_value = DEFAULT_OLLAMA_URL)]
         ollama_url: String,
-        // Directory containing markdown documentation files to inject as context
+        // Directory containing markdown documentation files to index
         #[arg(long, env = "DOCS_DIR", default_value = DEFAULT_DOCS_DIR)]
         docs_dir: String,
+        // Qdrant gRPC URL used for the local vector index (port 6334 by default)
+        #[arg(long, env = "QDRANT_URL", default_value = DEFAULT_QDRANT_URL)]
+        qdrant_url: String,
     },
 }
 
@@ -57,14 +66,20 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Chat { ollama_url, docs_dir } => {
-            run_chat(ollama_url, cli.model, cli.copilot, docs_dir).await
+        Commands::Chat { ollama_url, docs_dir, qdrant_url } => {
+            run_chat(ollama_url, cli.model, cli.copilot, docs_dir, qdrant_url).await
         }
     }
 }
 
 // Runs the interactive chat loop, sending user input to the chosen LLM backend and printing replies
-async fn run_chat(ollama_url: String, model: String, use_copilot: bool, docs_dir: String) -> Result<()> {
+async fn run_chat(
+    ollama_url: String,
+    model: String,
+    use_copilot: bool,
+    docs_dir: String,
+    qdrant_url: String,
+) -> Result<()> {
     // Build the appropriate backend based on whether --copilot was passed
     let client = if use_copilot {
         eprintln!("Authenticating with GitHub Copilot…");
@@ -72,81 +87,106 @@ async fn run_chat(ollama_url: String, model: String, use_copilot: bool, docs_dir
     } else {
         LlmClient::Ollama(OllamaClient::new(ollama_url, model))
     };
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
 
-    // Load and chunk documentation files; format each chunk with its source label
-    // so the LLM knows where the information comes from
+    // Chunk docs first so we can report the count in the indexing spinner message
     let chunks = load_chunks(&docs_dir);
-    let docs_context: String = chunks
-        .iter()
-        .map(|c| format!("\n\n[Source: {}]\n{}", c.source, c.text))
-        .collect();
-    let system_content = format!("{SYSTEM_PROMPT}{docs_context}");
 
-    // Conversation history sent with every request so the LLM has context
+    // Show a spinner while fastembed embeds all chunks and upserts them into Qdrant
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} Indexing documentation…")
+            .unwrap(),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(80));
+    let mut rag = RagStore::build(&chunks, &qdrant_url).await?;
+    spinner.finish_and_clear();
+    eprintln!("Ready — {} chunks indexed.", chunks.len());
+
+    // System prompt contains only role instructions; doc context is injected per-query via RAG
     let mut messages = vec![Message {
         role: "system".to_string(),
-        content: system_content,
+        content: SYSTEM_PROMPT.to_string(),
     }];
+
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
 
     loop {
         // Print prompt and flush immediately so it appears before the user types
         print!("> ");
         stdout.flush()?;
 
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) => break, // EOF (Ctrl-D)
-            Ok(_) => {
-                let input = line.trim();
-                if input.is_empty() {
-                    continue;
-                }
-                if input.eq_ignore_ascii_case("exit") {
+        // Read one line inside a block so the StdinLock is dropped before any .await calls
+        let input = {
+            let mut line = String::new();
+            match stdin.lock().read_line(&mut line) {
+                Ok(0) => break, // EOF (Ctrl-D)
+                Ok(_) => line.trim().to_string(),
+                Err(e) => {
+                    eprintln!("Error reading input: {e}");
                     break;
                 }
+            }
+        };
 
-                // Append the user turn before sending so the LLM sees the full history
+        if input.is_empty() {
+            continue;
+        }
+        if input.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        // Retrieve the most relevant documentation chunks for this query from Qdrant
+        let relevant = rag.search(&input, TOP_K).await?;
+
+        // If relevant chunks were found, prepend them so the LLM answers from documentation
+        let user_content = if relevant.is_empty() {
+            input.clone()
+        } else {
+            let ctx = relevant
+                .iter()
+                .map(|(source, text)| format!("[Source: {source}]\n{text}"))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            format!("Context from documentation:\n{ctx}\n\nQuestion: {input}")
+        };
+
+        // Append the user turn (with embedded context) before sending
+        messages.push(Message {
+            role: "user".to_string(),
+            content: user_content,
+        });
+
+        // Show a spinner while waiting for the first token from the LLM
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner} Thinking…")
+                .unwrap(),
+        );
+        spinner.enable_steady_tick(Duration::from_millis(80));
+
+        // Pass a callback that clears the spinner the moment the first token arrives
+        match client.chat(&messages, || spinner.finish_and_clear()).await {
+            Ok(reply) => {
+                // Tokens were already printed by the streaming chat call; just add spacing
+                println!();
+                // Store the assistant reply so future turns have full context
                 messages.push(Message {
-                    role: "user".to_string(),
-                    content: input.to_string(),
+                    role: "assistant".to_string(),
+                    content: reply,
                 });
-
-                // Show a spinner while waiting for the first token from the LLM
-                let spinner = ProgressBar::new_spinner();
-                spinner.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner} Thinking…")
-                        .unwrap(),
-                );
-                spinner.enable_steady_tick(Duration::from_millis(80));
-
-                // Pass a callback that clears the spinner the moment the first token arrives
-                match client.chat(&messages, || spinner.finish_and_clear()).await {
-                    Ok(reply) => {
-                        // Tokens were already printed by the streaming chat call; just add spacing
-                        println!();
-                        // Store the assistant reply so future turns have full context
-                        messages.push(Message {
-                            role: "assistant".to_string(),
-                            content: reply,
-                        });
-                    }
-                    Err(e) => {
-                        spinner.finish_and_clear();
-                        eprintln!("Error: {e}");
-                        // Remove the user message to keep history consistent with what the LLM has seen
-                        messages.pop();
-                    }
-                }
             }
             Err(e) => {
-                eprintln!("Error reading input: {e}");
-                break;
+                spinner.finish_and_clear();
+                eprintln!("Error: {e}");
+                // Remove the user message to keep history consistent with what the LLM has seen
+                messages.pop();
             }
         }
     }
 
     Ok(())
 }
+

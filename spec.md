@@ -42,7 +42,7 @@ The minimum viable product is a CLI. A stretch goal is an integration with GNOME
 ┌───────────────────▼─────────────────────────────────┐
 │                  Query Pipeline                     │
 │  1. Embed query (fastembed)                         │
-│  2. Search vector DB (LanceDB)                      │
+│  2. Search vector DB (Qdrant)                       │
 │  3. Retrieve top-k chunks + source paths            │
 └───────────────────┬─────────────────────────────────┘
                     │ chunks + metadata
@@ -76,14 +76,14 @@ The minimum viable product is a CLI. A stretch goal is an integration with GNOME
 - Walks the local doc directory for `.md` files
 - Parses markdown with `pulldown-cmark`, strips markup, preserves structure
 - Chunks text using `text-splitter` with token-aware splitting
-- Embeds each chunk with `fastembed` (downloads small embedding model on first run)
-- Stores chunks + vectors + source file path + Ubuntu version tag in LanceDB
-- Re-indexes only changed files (content hash or git diff)
+- Embeds each chunk with `fastembed` (BGE-small-en-v1.5, 384-dim; downloads model on first run)
+- Stores chunks + vectors + source file path in Qdrant (local gRPC server on port 6334)
+- Recreates the collection on each startup to stay in sync with docs/
 
 ### 3. Query Engine
 
 - Embeds the user's query with the same embedding model
-- Queries LanceDB for top-k semantically similar chunks, filtered by Ubuntu version
+- Queries Qdrant for top-k semantically similar chunks
 - Returns chunks with their source file paths
 
 ### 4. LLM Interface
@@ -128,8 +128,8 @@ The minimum viable product is a CLI. A stretch goal is an integration with GNOME
 | CLI | `clap` |
 | Markdown parsing | `pulldown-cmark` |
 | Text chunking | `text-splitter` + `tokenizers` |
-| Embeddings | `fastembed` |
-| Vector database | `lancedb` |
+| Embeddings | `fastembed` (BGE-small-en-v1.5) |
+| Vector database | `qdrant-client` (local Qdrant server) |
 | LLM (option A) | `llama-cpp-rs` |
 | LLM (option B) | Ollama HTTP API (`reqwest`) |
 | LLM (option C) | Canonical inference snap HTTP API |
