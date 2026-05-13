@@ -7,6 +7,8 @@ The current prototype is a CLI chat interface. It can talk to either:
 - a local model served through Ollama
 - a remote model via GitHub Copilot and the GitHub Models API
 
+[![Watch the demo](https://img.youtube.com/vi/zOLcazhCQBk/0.jpg)](https://www.youtube.com/watch?v=zOLcazhCQBk)
+
 ## Prerequisites
 
 **Hardware:** At least 2 GB of RAM and ~2 GB of disk space (for `deepseek-r1:1.5b`).
