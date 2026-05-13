@@ -26,9 +26,13 @@ const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer 
 #[derive(Parser)]
 #[command(name = "ubuntu-desktop-help", about = "Ubuntu Desktop Help CLI")]
 struct Cli {
-    // Model name to use; pass "copilot" to use GitHub Copilot instead of a local Ollama model
-    #[arg(long, env = "OLLAMA_MODEL", default_value = DEFAULT_MODEL, global = true)]
+    // Local Ollama model name (e.g. tinyllama, phi3:mini); mutually exclusive with --copilot
+    #[arg(long, env = "OLLAMA_MODEL", default_value = DEFAULT_MODEL, global = true, conflicts_with = "copilot")]
     model: String,
+
+    // Use GitHub Copilot via the GitHub Models API instead of a local model; mutually exclusive with --model
+    #[arg(long, global = true, conflicts_with = "model")]
+    copilot: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -39,7 +43,7 @@ struct Cli {
 enum Commands {
     /// Start an interactive chat session
     Chat {
-        // Ollama server URL; only used when --model is not "copilot"
+        // Ollama server URL; only used when --copilot is not set
         #[arg(long, env = "OLLAMA_URL", default_value = DEFAULT_OLLAMA_URL)]
         ollama_url: String,
         // Directory containing markdown documentation files to inject as context
@@ -53,14 +57,16 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Chat { ollama_url, docs_dir } => run_chat(ollama_url, cli.model, docs_dir).await,
+        Commands::Chat { ollama_url, docs_dir } => {
+            run_chat(ollama_url, cli.model, cli.copilot, docs_dir).await
+        }
     }
 }
 
 // Runs the interactive chat loop, sending user input to the chosen LLM backend and printing replies
-async fn run_chat(ollama_url: String, model: String, docs_dir: String) -> Result<()> {
-    // Build the appropriate backend: Copilot when model == "copilot", Ollama otherwise
-    let client = if model.eq_ignore_ascii_case("copilot") {
+async fn run_chat(ollama_url: String, model: String, use_copilot: bool, docs_dir: String) -> Result<()> {
+    // Build the appropriate backend based on whether --copilot was passed
+    let client = if use_copilot {
         eprintln!("Authenticating with GitHub Copilot…");
         LlmClient::Copilot(CopilotClient::create().await?)
     } else {
