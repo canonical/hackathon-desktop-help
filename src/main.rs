@@ -18,7 +18,7 @@ const DEFAULT_MODEL: &str = "deepseek-r1:1.5b";
 // Default directory to load documentation markdown files from
 const DEFAULT_DOCS_DIR: &str = "docs";
 // Instruction given to the LLM at the start of every conversation
-const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer questions clearly and concisely.";
+const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer questions clearly and concisely. The user you are talking to is running Ubuntu. Do not offer advice on alternative operating systems. Prefer strongly the information that you receive as context within a session.";
 
 // Top-level CLI struct; clap uses the fields and attributes to build argument parsing
 #[derive(Parser)]
