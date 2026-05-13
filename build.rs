@@ -2,6 +2,7 @@ use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -12,10 +13,21 @@ const CHUNK_SIZE: usize = 512;
 // Output dimension of BGE-small-en-v1.5; written into the index header so the runtime can verify
 const EMBEDDING_DIM: usize = 384;
 
+// Documentation repositories cloned into docs/ at build time.
+// Each tuple is (clone URL, subdirectory name under docs/).
+const DOCS_REPOS: &[(&str, &str)] = &[
+    ("https://github.com/ubuntu/ubuntu-desktop-documentation", "ubuntu-desktop-documentation"),
+    // ("https://github.com/canonical/ubuntu-server-documentation", "ubuntu-server-documentation"),
+    // ("https://github.com/canonical/ubuntu-core-docs", "ubuntu-core-docs"),
+];
+
 fn main() -> anyhow::Result<()> {
-    // Ask Cargo to re-run this script when docs or the script itself change
-    println!("cargo:rerun-if-changed=docs");
+    // Only re-run this build script when build.rs itself changes.
+    // We intentionally do NOT watch docs/ here: since we clone into docs/ ourselves,
+    // watching it would cause an infinite rebuild loop.
     println!("cargo:rerun-if-changed=build.rs");
+
+    clone_or_update_repos("docs")?;
 
     let out_dir = env::var("OUT_DIR")?;
     let index_path = Path::new(&out_dir).join("index.bin");
@@ -48,6 +60,34 @@ fn main() -> anyhow::Result<()> {
         EMBEDDING_DIM
     );
 
+    Ok(())
+}
+
+// Ensures every repo in DOCS_REPOS is present under `docs_dir`.
+// Clones with --depth 1 on first run; does `git pull --ff-only` on subsequent runs.
+fn clone_or_update_repos(docs_dir: &str) -> anyhow::Result<()> {
+    fs::create_dir_all(docs_dir)?;
+    for (url, name) in DOCS_REPOS {
+        let dest = Path::new(docs_dir).join(name);
+        if dest.join(".git").is_dir() {
+            println!("cargo:warning=Updating {name}…");
+            let status = Command::new("git")
+                .args(["-C", dest.to_str().unwrap(), "pull", "--ff-only", "--quiet"])
+                .status()?;
+            if !status.success() {
+                println!("cargo:warning=Warning: `git pull` failed for {name}; using existing checkout.");
+            }
+        } else {
+            println!("cargo:warning=Cloning {url} into docs/{name}…");
+            let status = Command::new("git")
+                .args(["clone", "--depth", "1", "--quiet", url, dest.to_str().unwrap()])
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("Failed to clone {url}");
+            }
+            println!("cargo:warning=Cloned {name}.");
+        }
+    }
     Ok(())
 }
 
