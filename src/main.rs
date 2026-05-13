@@ -7,7 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 // Import the LLM module defined in llm.rs
 mod llm;
-use llm::{Message, OllamaClient};
+use llm::{CopilotClient, LlmClient, Message, OllamaClient};
 
 // Import the docs chunking module defined in docs.rs
 mod docs;
@@ -26,7 +26,7 @@ const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer 
 #[derive(Parser)]
 #[command(name = "ubuntu-desktop-help", about = "Ubuntu Desktop Help CLI")]
 struct Cli {
-    // Model name to use with Ollama; can be overridden by OLLAMA_MODEL env var or --model flag
+    // Model name to use; pass "copilot" to use GitHub Copilot instead of a local Ollama model
     #[arg(long, env = "OLLAMA_MODEL", default_value = DEFAULT_MODEL, global = true)]
     model: String,
 
@@ -39,7 +39,7 @@ struct Cli {
 enum Commands {
     /// Start an interactive chat session
     Chat {
-        // Ollama server URL; can be overridden by the OLLAMA_URL env var or --ollama-url flag
+        // Ollama server URL; only used when --model is not "copilot"
         #[arg(long, env = "OLLAMA_URL", default_value = DEFAULT_OLLAMA_URL)]
         ollama_url: String,
         // Directory containing markdown documentation files to inject as context
@@ -57,9 +57,15 @@ async fn main() -> Result<()> {
     }
 }
 
-// Runs the interactive chat loop, sending user input to Ollama and printing replies
+// Runs the interactive chat loop, sending user input to the chosen LLM backend and printing replies
 async fn run_chat(ollama_url: String, model: String, docs_dir: String) -> Result<()> {
-    let client = OllamaClient::new(ollama_url, model);
+    // Build the appropriate backend: Copilot when model == "copilot", Ollama otherwise
+    let client = if model.eq_ignore_ascii_case("copilot") {
+        eprintln!("Authenticating with GitHub Copilot…");
+        LlmClient::Copilot(CopilotClient::create().await?)
+    } else {
+        LlmClient::Ollama(OllamaClient::new(ollama_url, model))
+    };
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 

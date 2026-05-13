@@ -1598,6 +1598,7 @@ name = "ubuntu-desktop-help"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
  "futures-util",
  "indicatif",
