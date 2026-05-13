@@ -13,7 +13,7 @@
 - **Package manager**: Cargo
 - **Formatter**: `rustfmt` (run before committing)
 - **Linter**: `clippy` (zero warnings policy on new code)
-- **Documentation**: Always comment your code, at least one comment per code block. Explain your reasoning shortly.
+- **Documentation**: Always comment your code, at least one comment per code block. Explain your reasoning shortly. Assume that the reader only has very basic Rust knowledge.
 
 ```bash
 rustup update stable
