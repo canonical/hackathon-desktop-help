@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.canonical.UbuntuDesktopHelp
+Exec=@BINARY@ --copilot dbus

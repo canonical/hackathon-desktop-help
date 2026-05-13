@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ubuntu Desktop Help
+Comment=Ask questions about using Ubuntu
+Exec=@BINARY@ --copilot gui
+Icon=help-browser
+Terminal=false
+Categories=GNOME;GTK;System;
+StartupNotify=true

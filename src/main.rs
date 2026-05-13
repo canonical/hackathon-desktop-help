@@ -13,6 +13,9 @@ use llm::{CopilotClient, LlmClient, Message, OllamaClient};
 mod docs;
 use docs::load_chunks;
 
+mod gui;
+mod search_provider;
+
 // Default address where Ollama listens when installed locally
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 // Default model to use; small enough to run without a GPU
@@ -20,7 +23,7 @@ const DEFAULT_MODEL: &str = "deepseek-r1:1.5b";
 // Default directory to load documentation markdown files from
 const DEFAULT_DOCS_DIR: &str = "docs";
 // Instruction given to the LLM at the start of every conversation
-const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer questions clearly and concisely. The user you are talking to is running Ubuntu. Do not offer advice on alternative operating systems. Prefer strongly the information that you receive as context within a session.";
+pub(crate) const SYSTEM_PROMPT: &str = "You are a helpful Ubuntu Desktop assistant. Answer questions clearly and concisely. The user you are talking to is running Ubuntu. Do not offer advice on alternative operating systems. Prefer strongly the information that you receive as context within a session.";
 
 // Top-level CLI struct; clap uses the fields and attributes to build argument parsing
 #[derive(Parser)]
@@ -50,17 +53,36 @@ enum Commands {
         #[arg(long, env = "DOCS_DIR", default_value = DEFAULT_DOCS_DIR)]
         docs_dir: String,
     },
+    /// Run the GNOME Shell search provider over D-Bus (auto-activated; not normally run by hand)
+    Dbus,
+    /// Open the GTK answer window for a single query (invoked by the search provider)
+    Gui {
+        /// The question to ask; remaining args are joined with spaces. If absent,
+        /// the window opens with a placeholder message instead of calling the LLM.
+        #[arg(trailing_var_arg = true)]
+        query: Vec<String>,
+    },
 }
 
-// Entry point; #[tokio::main] sets up the async runtime so we can use .await
-#[tokio::main]
-async fn main() -> Result<()> {
+// Plain entry point: the gui subcommand needs to run GTK's main loop, so we
+// build a tokio runtime only for the subcommands that actually need it.
+fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Chat { ollama_url, docs_dir } => {
-            run_chat(ollama_url, cli.model, cli.copilot, docs_dir).await
+            tokio_runtime()?.block_on(run_chat(ollama_url, cli.model, cli.copilot, docs_dir))
         }
+        Commands::Dbus => {
+            tokio_runtime()?.block_on(search_provider::run())
+        }
+        Commands::Gui { query } => gui::run(query.join(" "), cli.copilot, cli.model),
     }
+}
+
+fn tokio_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?)
 }
 
 // Runs the interactive chat loop, sending user input to the chosen LLM backend and printing replies
@@ -122,10 +144,16 @@ async fn run_chat(ollama_url: String, model: String, use_copilot: bool, docs_dir
                 );
                 spinner.enable_steady_tick(Duration::from_millis(80));
 
-                // Pass a callback that clears the spinner the moment the first token arrives
-                match client.chat(&messages, || spinner.finish_and_clear()).await {
+                // Pass two callbacks: one fires when the spinner should clear,
+                // one fires per streamed token so we can print it to stdout.
+                let on_first_token = || spinner.finish_and_clear();
+                let on_token = |t: &str| {
+                    print!("{t}");
+                    let _ = io::stdout().flush();
+                };
+                match client.chat(&messages, on_first_token, on_token).await {
                     Ok(reply) => {
-                        // Tokens were already printed by the streaming chat call; just add spacing
+                        // Tokens were printed by the on_token callback; add a trailing newline
                         println!();
                         // Store the assistant reply so future turns have full context
                         messages.push(Message {
@@ -134,7 +162,6 @@ async fn run_chat(ollama_url: String, model: String, use_copilot: bool, docs_dir
                         });
                     }
                     Err(e) => {
-                        spinner.finish_and_clear();
                         eprintln!("Error: {e}");
                         // Remove the user message to keep history consistent with what the LLM has seen
                         messages.pop();

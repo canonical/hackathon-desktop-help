@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use std::process::Command as StdCommand;
 
 use anyhow::{Context, Result};
@@ -91,12 +90,18 @@ impl OllamaClient {
     }
 
     // Streams the reply token-by-token via Ollama's NDJSON format.
-    // `on_first_token` fires once just before the first character is printed.
-    pub async fn chat<F: FnOnce()>(
+    // `on_first_token` fires once just before the first token is delivered.
+    // `on_token` receives each token's text as it arrives.
+    pub async fn chat<F, T>(
         &self,
         messages: &[Message],
         on_first_token: F,
-    ) -> Result<String> {
+        on_token: T,
+    ) -> Result<String>
+    where
+        F: FnOnce(),
+        T: FnMut(&str),
+    {
         let req = OllamaChatRequest {
             model: &self.model,
             messages,
@@ -115,7 +120,7 @@ impl OllamaClient {
             .error_for_status()?;
 
         // Ollama streams newline-delimited JSON; each chunk is one line
-        stream_ndjson(response.bytes_stream(), on_first_token, |line| {
+        stream_ndjson(response.bytes_stream(), on_first_token, on_token, |line| {
             let chunk: OllamaStreamChunk =
                 serde_json::from_str(line).context("failed to parse Ollama stream chunk")?;
             Ok(StreamToken {
@@ -171,12 +176,18 @@ impl CopilotClient {
     }
 
     // Streams the reply token-by-token via the GitHub Models OpenAI-compatible SSE API.
-    // `on_first_token` fires once just before the first character is printed.
-    pub async fn chat<F: FnOnce()>(
+    // `on_first_token` fires once just before the first token is delivered.
+    // `on_token` receives each token's text as it arrives.
+    pub async fn chat<F, T>(
         &self,
         messages: &[Message],
         on_first_token: F,
-    ) -> Result<String> {
+        on_token: T,
+    ) -> Result<String>
+    where
+        F: FnOnce(),
+        T: FnMut(&str),
+    {
         let req = OpenAiChatRequest {
             model: COPILOT_MODEL,
             messages,
@@ -200,7 +211,7 @@ impl CopilotClient {
         }
 
         // Copilot streams Server-Sent Events; each line is "data: <json>" or "data: [DONE]"
-        stream_ndjson(response.bytes_stream(), on_first_token, |line| {
+        stream_ndjson(response.bytes_stream(), on_first_token, on_token, |line| {
             // Strip the SSE "data: " prefix
             let json = line
                 .strip_prefix("data: ")
@@ -235,14 +246,19 @@ pub enum LlmClient {
 }
 
 impl LlmClient {
-    pub async fn chat<F: FnOnce()>(
+    pub async fn chat<F, T>(
         &self,
         messages: &[Message],
         on_first_token: F,
-    ) -> Result<String> {
+        on_token: T,
+    ) -> Result<String>
+    where
+        F: FnOnce(),
+        T: FnMut(&str),
+    {
         match self {
-            LlmClient::Ollama(c) => c.chat(messages, on_first_token).await,
-            LlmClient::Copilot(c) => c.chat(messages, on_first_token).await,
+            LlmClient::Ollama(c) => c.chat(messages, on_first_token, on_token).await,
+            LlmClient::Copilot(c) => c.chat(messages, on_first_token, on_token).await,
         }
     }
 }
@@ -257,11 +273,12 @@ struct StreamToken {
 }
 
 // Reads a byte stream line-by-line, calls `parse_line` on each non-empty line,
-// prints content tokens as they arrive, and returns the full assembled reply.
-// `on_first_token` is called once before the first non-empty token is printed.
-async fn stream_ndjson<S, E, F, P>(
+// delivers tokens to `on_token` as they arrive, and returns the full assembled reply.
+// `on_first_token` is called once just before the first non-empty token is delivered.
+async fn stream_ndjson<S, E, F, P, T>(
     mut stream: S,
     on_first_token: F,
+    mut on_token: T,
     parse_line: P,
 ) -> Result<String>
 where
@@ -269,11 +286,10 @@ where
     E: std::error::Error + Send + Sync + 'static,
     F: FnOnce(),
     P: Fn(&str) -> Result<StreamToken>,
+    T: FnMut(&str),
 {
     let mut full_reply = String::new();
     let mut buf = Vec::new();
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
     // Wrap in Option so the callback fires exactly once
     let mut on_first_token = Some(on_first_token);
 
@@ -296,20 +312,16 @@ where
                 if let Some(f) = on_first_token.take() {
                     f();
                 }
-                write!(out, "{}", token.content)?;
-                out.flush()?;
+                on_token(&token.content);
                 full_reply.push_str(&token.content);
             }
 
             if token.done {
-                // Move to a new line after the final token
-                writeln!(out)?;
                 return Ok(full_reply);
             }
         }
     }
 
-    writeln!(out)?;
     Ok(full_reply)
 }
 
