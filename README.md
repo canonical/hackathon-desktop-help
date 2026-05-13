@@ -39,18 +39,18 @@ Start the app, passing the model name you pulled:
 cargo run chat --model tinyllama
 ```
 
-For a release build, add `--release`:
-
-```bash
-cargo run --release chat --model tinyllama
-```
-
 If `--model` is not specified, the app defaults to `deepseek-r1:1.5b`.
 
 You can also set the model and server URL via environment variables:
 
 ```bash
 OLLAMA_MODEL=deepseek-r1:1.5b OLLAMA_URL=http://localhost:11434 cargo run chat
+```
+
+For a release build, add `--release`:
+
+```bash
+cargo run --release chat --model tinyllama
 ```
 
 ## Run the app with GitHub Copilot
