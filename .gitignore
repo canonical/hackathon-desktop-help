@@ -6,3 +6,6 @@
 
 # Documentation repos cloned at build time
 /docs/
+
+# fastembed model cache
+/.fastembed_cache/
