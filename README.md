@@ -9,13 +9,20 @@ The current prototype is a CLI chat interface. It can talk to either:
 
 ## Prerequisites
 
-**Hardware:** at least 2 GB of RAM and ~2 GB of disk space (for `deepseek-r1:1.5b`).
+**Hardware:** At least 2 GB of RAM and ~2 GB of disk space (for `deepseek-r1:1.5b`).
 
 **Rust and Cargo**
 
 ```bash
 sudo snap install rustup --classic
 rustup toolchain install stable
+```
+
+## Build a release binary
+
+```bash
+cargo build --release
+./target/release/ubuntu-desktop-help chat --model tinyllama
 ```
 
 ## Run the app with a local model
@@ -54,6 +61,7 @@ Use this mode to switch from a local Ollama-served model to a remote model via t
 This can feel faster than running a local model because the inference work does
 not happen on your machine, though the result still depends on network latency.
 
+
 First, authenticate with GitHub Copilot. The simplest way is via the GitHub CLI:
 
 ```bash
@@ -84,9 +92,5 @@ cargo run --copilot chat
 
 The app uses `gpt-4o-mini` via the GitHub Models API.
 
-## Build a release binary
 
-```bash
-cargo build --release
-./target/release/ubuntu-desktop-help chat --model tinyllama
-```
+
