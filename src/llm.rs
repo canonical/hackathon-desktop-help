@@ -52,8 +52,10 @@ impl OllamaClient {
     }
 
     // Streams the assistant reply token-by-token, printing each token immediately as it arrives.
+    // `on_first_token` is called once, just before the first character is printed — use it to
+    // clear a spinner or other loading indicator.
     // Returns the full assembled reply string when done.
-    pub async fn chat(&self, messages: &[Message]) -> Result<String> {
+    pub async fn chat(&self, messages: &[Message], on_first_token: impl FnOnce()) -> Result<String> {
         let req = ChatRequest {
             model: &self.model,
             messages,
@@ -78,6 +80,8 @@ impl OllamaClient {
         let mut buf = Vec::new();
         let stdout = io::stdout();
         let mut out = stdout.lock();
+        // Wrap in Option so we can call it exactly once with on_first_token.take()
+        let mut on_first_token = Some(on_first_token);
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk.context("error reading stream chunk")?;
@@ -96,10 +100,16 @@ impl OllamaClient {
                 let chunk: StreamChunk =
                     serde_json::from_str(line).context("failed to parse stream chunk")?;
 
-                // Print the token immediately without a newline so output flows continuously
-                write!(out, "{}", chunk.message.content)?;
-                out.flush()?;
-                full_reply.push_str(&chunk.message.content);
+                if !chunk.message.content.is_empty() {
+                    // Fire the callback the first time we have content to print
+                    if let Some(f) = on_first_token.take() {
+                        f();
+                    }
+                    // Print the token immediately without a newline so output flows continuously
+                    write!(out, "{}", chunk.message.content)?;
+                    out.flush()?;
+                    full_reply.push_str(&chunk.message.content);
+                }
 
                 if chunk.done {
                     break;

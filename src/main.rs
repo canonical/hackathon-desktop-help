@@ -1,7 +1,9 @@
 use std::io::{self, BufRead, Write};
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 
 // Import the LLM module defined in llm.rs
 mod llm;
@@ -99,7 +101,17 @@ async fn run_chat(ollama_url: String, model: String, docs_dir: String) -> Result
                     content: input.to_string(),
                 });
 
-                match client.chat(&messages).await {
+                // Show a spinner while waiting for the first token from the LLM
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner} Thinking…")
+                        .unwrap(),
+                );
+                spinner.enable_steady_tick(Duration::from_millis(80));
+
+                // Pass a callback that clears the spinner the moment the first token arrives
+                match client.chat(&messages, || spinner.finish_and_clear()).await {
                     Ok(reply) => {
                         // Tokens were already printed by the streaming chat call; just add spacing
                         println!();
@@ -110,6 +122,7 @@ async fn run_chat(ollama_url: String, model: String, docs_dir: String) -> Result
                         });
                     }
                     Err(e) => {
+                        spinner.finish_and_clear();
                         eprintln!("Error: {e}");
                         // Remove the user message to keep history consistent with what the LLM has seen
                         messages.pop();
