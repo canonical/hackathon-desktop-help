@@ -18,13 +18,6 @@ sudo snap install rustup --classic
 rustup toolchain install stable
 ```
 
-## Build a release binary
-
-```bash
-cargo build --release
-./target/release/ubuntu-desktop-help chat --model tinyllama
-```
-
 ## Run the app with a local model
 
 The app talks to a local model through Ollama. Install it first:
@@ -44,6 +37,12 @@ Start the app, passing the model name you pulled:
 
 ```bash
 cargo run chat --model tinyllama
+```
+
+For a release build, add `--release`:
+
+```bash
+cargo run --release chat --model tinyllama
 ```
 
 If `--model` is not specified, the app defaults to `deepseek-r1:1.5b`.
@@ -90,7 +89,10 @@ Then start the app with the `--copilot` flag:
 cargo run --copilot chat
 ```
 
+For a release build, add `--release`:
+
+```bash
+cargo run --release --copilot chat
+```
+
 The app uses `gpt-4o-mini` via the GitHub Models API.
-
-
-
