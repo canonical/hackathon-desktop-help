@@ -56,34 +56,23 @@ struct Chunk {
     text: String,
 }
 
-// Walks `dir` for .md files, strips markdown to plain text, and splits into chunks.
+// Walks `dir` recursively for .md files, strips markdown to plain text, and splits into chunks.
 fn load_chunks(dir: &str) -> Vec<Chunk> {
-    let path = Path::new(dir);
-    if !path.is_dir() {
-        return Vec::new();
-    }
-
-    let mut entries: Vec<_> = match fs::read_dir(path) {
-        Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
-        Err(_) => return Vec::new(),
-    };
+    let mut md_files = Vec::new();
+    collect_md_files(Path::new(dir), &mut md_files);
     // Sort for a deterministic index regardless of filesystem ordering
-    entries.sort_by_key(|e| e.file_name());
+    md_files.sort();
 
     let splitter = TextSplitter::new(CHUNK_SIZE);
     let mut chunks = Vec::new();
 
-    for entry in entries {
-        let entry_path = entry.path();
-        if entry_path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let raw = match fs::read_to_string(&entry_path) {
+    for file_path in &md_files {
+        let raw = match fs::read_to_string(file_path) {
             Ok(c) => c,
             Err(_) => continue,
         };
         let plain = markdown_to_plain_text(&raw);
-        let source = entry_path.display().to_string();
+        let source = file_path.display().to_string();
         for chunk_text in splitter.chunks(&plain) {
             let text = chunk_text.trim().to_string();
             if !text.is_empty() {
@@ -93,6 +82,22 @@ fn load_chunks(dir: &str) -> Vec<Chunk> {
     }
 
     chunks
+}
+
+// Recursively collects all .md file paths under `dir` into `out`.
+fn collect_md_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(iter) => iter,
+        Err(_) => return,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_md_files(&path, out);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("md") {
+            out.push(path);
+        }
+    }
 }
 
 // Strips markdown syntax to plain text using pulldown-cmark's event stream.
