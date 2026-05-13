@@ -1,54 +1,92 @@
 # Desktop help app
 
-An experimental LLM-based application written in Rust for users to get answers about using Ubuntu.
+An experimental Rust application for answering Ubuntu Desktop questions with a local documentation context.
 
-## Build Instructions
+The current prototype is a CLI chat interface. It can talk to either:
 
-### Prerequisites
+- a local model served through Ollama
+- a remote model via GitHub Copilot and the GitHub Models API
 
-- **Rust** (1.70+): Install from [rustup.rs](https://rustup.rs/)
-- **Ollama**: Local LLM inference engine
+## Prerequisites
 
-### Setup
+**Hardware:** at least 2 GB of RAM and ~2 GB of disk space (for `deepseek-r1:1.5b`).
 
-First, clone the repository and change into the root of the repo.
+**Rust and Cargo**
 
-#### 1. Install Ollama
+```bash
+sudo snap install rustup --classic
+rustup toolchain install stable
+```
+
+## Run the app with a local model
+
+The app talks to a local model through Ollama. Install it first:
 
 ```bash
 sudo snap install ollama
 ```
 
-#### 2. Pull the Required Model
-
-The app uses `deepseek-r1:1.5b` by default. Pull it with:
+Pull a model, for example:
 
 ```bash
 ollama pull deepseek-r1:1.5b
+ollama pull tinyllama
 ```
 
-To use a different model, pass it via the `--model` flag or `OLLAMA_MODEL` environment variable.
+Start the app, passing the model name you pulled:
 
-#### 3. Build the Application
+```bash
+cargo run chat --model tinyllama
+```
+
+If `--model` is not specified, the app defaults to `deepseek-r1:1.5b`.
+
+You can also set the model and server URL via environment variables:
+
+```bash
+OLLAMA_MODEL=deepseek-r1:1.5b OLLAMA_URL=http://localhost:11434 cargo run chat
+```
+
+## Run the app with GitHub Copilot
+
+Use this mode to switch from a local Ollama-served model to a remote model via the GitHub Models API.
+
+This can feel faster than running a local model because the inference work does
+not happen on your machine, though the result still depends on network latency.
+
+First, authenticate with GitHub Copilot. The simplest way is via the GitHub CLI:
+
+```bash
+sudo apt install gh
+gh auth login
+gh auth token  # verify it works
+```
+
+Alternatively, set `COPILOT_TOKEN` directly — this takes precedence over the GitHub CLI. Generate a token at [github.com/settings/tokens](https://github.com/settings/tokens) with the `models:read` scope, or use a token from an existing GitHub Copilot subscription.
+
+In Bash:
+
+```bash
+export COPILOT_TOKEN=your_token_here
+```
+
+In Fish:
+
+```fish
+set -x COPILOT_TOKEN your_token_here
+```
+
+Then start the app with the `--copilot` flag:
+
+```bash
+cargo run --copilot chat
+```
+
+The app uses `gpt-4o-mini` via the GitHub Models API.
+
+## Build a release binary
 
 ```bash
 cargo build --release
+./target/release/ubuntu-desktop-help chat --model tinyllama
 ```
-
-The binary will be available at `target/release/ubuntu-desktop-help`.
-
-### Running
-
-```bash
-# Start the interactive chat interface
-./target/release/ubuntu-desktop-help chat
-
-# Or use the debug build for development
-cargo run -- chat
-```
-
-### System Requirements
-
-- Ollama service running (automatically started via snap)
-- At least 2GB of RAM for the `deepseek-r1:1.5b` model
-- ~2GB disk space for the model
