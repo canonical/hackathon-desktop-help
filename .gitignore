@@ -3,3 +3,6 @@
 
 # Lock file (keep for binaries, ignore for libraries)
 # Cargo.lock
+
+# Documentation repos cloned at build time
+/docs/
