@@ -2,9 +2,11 @@
 
 ## Purpose
 
-Replace the legacy GNOME Help app with an AI-powered assistant that answers questions about using Ubuntu Desktop. The user asks a natural-language question; the app retrieves relevant chunks from the local Ubuntu documentation, feeds them to a local LLM, and returns an answer plus links to relevant doc pages.
+Create an AI-powered assistant that answers questions about using Ubuntu. The user asks a natural-language question; the app retrieves relevant chunks from the local markdown-based Ubuntu documentation, feeds them to a local LLM, and returns an answer plus links to relevant doc pages.
 
 This is a local-first, context-based, offline tool. It uses official Ubuntu docs as its knowledge base and integrates optionally into GNOME Shell's overview search.
+
+The minimum viable product is a CLI. A stretch goal is an integration with GNOME shell overview search.
 
 ---
 
